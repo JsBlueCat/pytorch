@@ -151,6 +151,12 @@ Tensor FunctionalInverses::expand_copy_inverse(const Tensor& base, const Tensor&
     return at::sum_to(mutated_view, base.sym_sizes(),/*always_return_non_view=*/!reapply_views);
 }
 
+Tensor FunctionalInverses::expand_as_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views,const Tensor& other) {
+    return at::sum_to(mutated_view, base.sym_sizes(),/*always_return_non_view=*/!reapply_views);
+}
+
+
+
 Tensor FunctionalInverses::permute_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::IntArrayRef dims) {
     return at::functionalization::permute_copy_inverse(mutated_view, dims, reapply_views);
 }

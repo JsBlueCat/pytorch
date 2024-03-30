@@ -2595,6 +2595,8 @@
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
   device_check: NoCheck
   device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: expand_as
 
 # decomposes to eye.m
 - func: eye(SymInt n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -3759,12 +3761,10 @@
 - func: max.names_dim_max(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
   device_check: NoCheck   # TensorIterator
 
-- func: value_selecting_reduction_backward(Tensor grad, int dim, Tensor indices, SymInt[] sizes, bool keepdim) -> Tensor
+- func: value_selecting_reduction_backward(Tensor grad, int dim, Tensor indices, Tensor sizes, bool keepdim) -> Tensor
   variants: function
   device_check: NoCheck
   device_guard: False
-  dispatch:
-    CompositeImplicitAutograd: value_selecting_reduction_backward_symint
 
 - func: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   variants: function, method
@@ -14224,6 +14224,13 @@
     CompositeExplicitAutogradNonFunctional: expand_copy_symint
   tags: view_copy
   autogen: expand_copy.out
+
+- func: expand_as_copy(Tensor self, Tensor other) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: expand_as_copy
+  tags: view_copy
+  autogen: expand_as_copy.out
 
 - func: permute_copy(Tensor self, int[] dims) -> Tensor
   variants: function

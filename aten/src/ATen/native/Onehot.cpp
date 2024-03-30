@@ -5,7 +5,9 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/eq.h>
 #include <ATen/ops/one_hot_native.h>
 #include <ATen/ops/zeros.h>
 #endif
@@ -14,6 +16,17 @@ namespace at { namespace native {
 
 Tensor one_hot(const Tensor &self, int64_t num_classes) {
     TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor.");
+    // using meta bit test to catch Fake Tensor as well until __torch_function__
+    if (self.key_set().has_all(DispatchKeySet(BackendComponent::MetaBit)) ||
+            self.key_set().has_all(DispatchKeySet(DispatchKey::Python))) {
+        // functional version that torch.compiles better and works with dynamic shapes
+        if (num_classes == -1) {
+          num_classes = self.max().item().toLong() + 1;
+        }
+        at::Tensor index = at::arange(num_classes, self.options());
+        return at::eq(self.unsqueeze(-1), index).to(kLong);
+    }
+
     auto shape = self.sizes().vec();
 
     // empty tensor could be converted to one hot representation,

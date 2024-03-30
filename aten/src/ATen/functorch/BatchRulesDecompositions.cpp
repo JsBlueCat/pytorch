@@ -296,7 +296,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(trapz, x);
   OP_DECOMPOSE2(trapz, dx);
   OP_DECOMPOSE(unsafe_chunk);
-  m.impl("value_selecting_reduction_backward", native::value_selecting_reduction_backward_symint);
+  m.impl("value_selecting_reduction_backward", native::value_selecting_reduction_backward);
   OP_DECOMPOSE(var);
   OP_DECOMPOSE2(var, dim);
   OP_DECOMPOSE(var_mean);

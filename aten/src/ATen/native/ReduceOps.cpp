@@ -2228,26 +2228,21 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
   return result.load();
 }
 
-static Tensor value_selecting_reduction_backward(const Tensor& grad, int64_t dim, const Tensor& indices, at::IntArrayRef sizes, bool keepdim) {
-    return at::native::value_selecting_reduction_backward_symint(grad, dim, indices, c10::fromIntArrayRefSlow(sizes), keepdim);
-}
-
-
 // max(dim), min(dim), topk(dim), mode(dim), are examples of reduction
 // functions that select values. value_selecting_reduction_backward is the
 // backward function for those operators; it propagates the grad to the
 // specific value locations referred to at `indices`.
-Tensor value_selecting_reduction_backward_symint(const Tensor& grad, int64_t dim, const Tensor& indices, c10::SymIntArrayRef sizes, bool keepdim) {
+Tensor value_selecting_reduction_backward(const Tensor& grad, int64_t dim, const Tensor& indices, const Tensor& src, bool keepdim) {
   auto inplace_scatter_if_not_tensor_subclass =
       [&](const Tensor& grad_out, const Tensor& indices_) {
-        auto grad_in = at::zeros_symint(sizes, grad_out.options());
+        auto grad_in = at::zeros_like(src, grad_out.options());
         if (areAnyTensorSubclassLike({grad, indices})) {
           return grad_in.scatter(dim, indices_, grad_out);
         }
         return grad_in.scatter_(dim, indices_, grad_out);
       };
 
-  if (!keepdim && !sizes.empty()) {
+  if (!keepdim && !src.sizes().empty()) {
     auto grad_ = grad.unsqueeze(dim);
     auto indices_ = indices.unsqueeze(dim);
     return inplace_scatter_if_not_tensor_subclass(grad_, indices_);
