@@ -266,6 +266,64 @@ class NewGlobalVariable(VariableTracker):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+class BoundArgumentsVariable(VariableTracker):
+    """
+    This class is used to hack python code about `inspect` package, and not well-designed.
+    Please use it with caution.
+    """
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+        self.value.arguments = BoundArgumentsVariable.convert_to_variable_tracker(value.arguments)
+
+    @staticmethod
+    def convert_to_variable_tracker(arguments):
+        for key in arguments.keys():
+            val = arguments[key]
+            if isinstance(val, VariableTracker):
+                continue
+            # we only convert values of the first depth to VariableTracker,
+            # VariableTracker values of more than one depth should be handled by the caller.
+
+            if isinstance(val, (bool, int, float, type(None))):
+                arguments[key] = variables.ConstantVariable.create(val)
+            elif isinstance(val, set):
+                arguments[key] = variables.SetVariable(list(val))
+            elif isinstance(val, list):
+                arguments[key] = variables.ListVariable(val)
+            elif isinstance(val, dict):
+                arguments[key] = variables.ConstDictVariable(val)
+            elif isinstance(val, tuple):
+                arguments[key] = variables.TupleVariable(list(val))
+            else:
+                raise TypeError("unsupported arguments value type")
+        return arguments
+
+    @staticmethod
+    def create(value, **kwargs):
+        if kwargs:
+            unimplemented(f"inspect.BoundArguments with {kwargs}")
+        return BoundArgumentsVariable(value)
+
+    def var_getattr(self, tx, name: str) -> "VariableTracker":
+        if name == "arguments":
+            return variables.ConstDictVariable(self.value.arguments)
+        if name in ["signature", "_signature"]:
+            return InspectSignatureVariable.create(self.value._signature)
+        if name in ["args"]:
+            return variables.TupleVariable(list(self.value.args))
+        if name in ["kwargs"]:
+            return variables.ConstDictVariable(self.value.kwargs)
+        return super().var_getattr(tx, name)
+
+    def call_method(self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]) -> VariableTracker:
+        if name == "apply_defaults":
+            assert len(args) == 0 and len(kwargs) == 0
+            self.value.apply_defaults()
+            BoundArgumentsVariable.convert_to_variable_tracker(self.value.arguments)
+            return variables.ConstantVariable.create(None)
+        return super().call_method(tx, name, args, kwargs)
+
 
 class InspectSignatureVariable(VariableTracker):
     """represents inspect.signature(...)"""
@@ -279,23 +337,52 @@ class InspectSignatureVariable(VariableTracker):
     def __init__(self, inspected: VariableTracker, **kwargs):
         super().__init__(**kwargs)
         self.inspected = inspected
+        self.python_signature = None
+        if isinstance(self.inspected, variables.UserMethodVariable):
+            self.python_signature = inspect.signature(getattr(self.inspected.obj.value, self.inspected.fn.__name__))
+        elif isinstance(self.inspected, variables.UserFunctionVariable):
+            self.python_signature = inspect.signature(self.inspected.fn)
+        else:
+            unimplemented("unsupported callable")
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         if name == "parameters":
+            paramters = self.python_signature.parameters
             return variables.ConstDictVariable(
                 {
-                    name: InspectParameterVariable()
-                    for name in self.inspected.inspect_parameter_names()
+                    variables.ConstantVariable.create(name): InspectParameterVariable(value)
+                    for name, value in paramters.items()
                 },
                 user_cls=dict,
             )
         return super().var_getattr(tx, name)
 
+    def call_method(self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]) -> VariableTracker:
+        if name == "bind":
+            # NOTE: InspectSignatureVariable only record the inspected user_method or function
+            # we need recover from it.
+            return BoundArgumentsVariable.create(self.python_signature.bind(*args, **kwargs))
+        return super().call_method(tx, name, args, kwargs)
+
 
 class InspectParameterVariable(VariableTracker):
     """This is not implemented, if used will graph break."""
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
 
-    pass
+    @staticmethod
+    def create(value, **kwargs):
+        if kwargs:
+            unimplemented(f"inspect.signature with {kwargs}")
+        return InspectParameterVariable(value=value)
+
+    def var_getattr(self, tx, name: str) -> "VariableTracker":
+        if name in ["POSITIONAL_ONLY", "POSITIONAL_OR_KEYWORD", "VAR_POSITIONAL", "KEYWORD_ONLY", "VAR_KEYWORD"]:
+            return variables.ConstantVariable.create(getattr(inspect._ParameterKind, name))
+        if name in ["kind", "name", "default"]:
+            return variables.ConstantVariable.create(getattr(self.value, name))
+        return super().var_getattr(tx, name)
 
 
 def produce_trampoline_autograd_fwd(fn_cls):

@@ -16,6 +16,27 @@ from .utils import strict_zip
 
 zip = strict_zip
 
+def is_dtensor_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
+    args_flattened = pytree.arg_tree_leaves(*args)
+    # NOTE: hack: separately check DTensor dispatch
+    any_subclass_args = all(
+        (
+            is_traceable_wrapper_subclass(x) and
+            x.__class__.__name__ == "DTensor"
+        )
+        for x in args_flattened
+        if isinstance(x, Tensor)
+    )
+    any_subclass_outputs = all(
+        (
+            is_traceable_wrapper_subclass(x) and
+            x.__class__.__name__ == "DTensor"
+        )
+        for x in fw_metadata.traced_tangents
+        if isinstance(x, Tensor)
+    )
+    return any_subclass_args or any_subclass_outputs
+
 
 def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
     args_flattened = pytree.arg_tree_leaves(*args)

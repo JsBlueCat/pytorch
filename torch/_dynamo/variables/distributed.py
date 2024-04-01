@@ -24,9 +24,7 @@ class DistributedVariable(VariableTracker):
 def is_from_local(value):
     if not DistributedVariable.is_available():
         return False
-    from torch.distributed._tensor import DTensor
-
-    return inspect.isfunction(value) and value is DTensor.from_local
+    return inspect.isfunction(value) and value.__name__ == "from_local"
 
 
 def is_constant_pg_functions(value):
@@ -57,17 +55,17 @@ class PlacementClassVariable(DistributedVariable):
         if not DistributedVariable.is_available():
             return False
 
-        from torch.distributed._tensor.placement_types import Placement
+            if not isinstance(value, type):
+                return False
+            return value.__name__ in ("Placement", "Replicate", "Shard", "_Partial" "Partial", "InterleavedShard")
 
-        return type(value) is type and issubclass(value, Placement)
+    def as_python_constant(self):
+        return self.value
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        if (
-            inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
-            and self.source
-        ):
+        if inspect.getattr_static(self.value, "__new__", None) in (object.__new__,) and self.source:
             # NOTE: we don't need to track mutations to the placement class as they
             # suppose to be immutable.
             new_obj = object.__new__(self.value)
@@ -90,9 +88,7 @@ class PlacementVariable(DistributedVariable):
         if not DistributedVariable.is_available():
             return False
 
-        from torch.distributed._tensor.placement_types import Placement
-
-        return isinstance(value, Placement)
+        return type(value).__name__ in ("Placement", "Replicate", "Shard", "_Partial" "Partial", "InterleavedShard")
 
     def as_python_constant(self):
         return self.value
@@ -106,15 +102,30 @@ class PlacementVariable(DistributedVariable):
     ) -> "VariableTracker":
         from . import ConstantVariable
 
-        allowed_methods = ["__init__", "__setattr__"]
-        # placement types dynamo tracking allows only __init__
-        # and __setattr__ methods, the latter is for case like `Shard(dim)`
-        if name in allowed_methods:
+# Placement types dynamo tracking only allows following methods
+        # and __setattr__  is for case like `shard(dim)` and methods.
+        # methods in the list must satisfy:
+        #    1. input arguments are constants and do not need to be guarded on;
+        #    2. output is constant with respect to their inputs
+        constant_fold_functions = [
+            "__init__",
+            "__setattr__",
+            "is_shard",
+            "is_partial",
+            "is_replicate",
+            "is_interleaved_shard",
+        ]
+        return_constant_functions = [
+            "is_shard",
+            "is_partial",
+            "is_replicate",
+            "is_interleaved_shard",
+        ]
+
+        if name in constant_fold_functions:
             try:
                 value_type = type(self.value)
-                assert (
-                    inspect.getattr_static(value_type, "__getattr__", None) is None
-                ), "no custom getattr allowed!"
+                assert inspect.getattr_static(value_type, "__getattr__", None) is None, "no custom getattr allowed!"
                 method = inspect.getattr_static(value_type, name)
             except AttributeError:
                 method = None
@@ -123,7 +134,9 @@ class PlacementVariable(DistributedVariable):
 
             args = [x.as_python_constant() for x in args]
             kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            method(self.value, *args, **kwargs)
+            out = method(self.value, *args, **kwargs)
+            if name in return_constant_functions:
+                return ConstantVariable(out)
             return self
 
         return super().call_method(tx, name, args, kwargs)
@@ -140,9 +153,7 @@ class DeviceMeshVariable(DistributedVariable):
         if not DistributedVariable.is_available():
             return False
 
-        from torch.distributed.device_mesh import DeviceMesh
-
-        return istype(value, DeviceMesh)
+        return type(value).__name__ == "DeviceMesh"
 
     def as_python_constant(self):
         return self.value
@@ -150,6 +161,9 @@ class DeviceMeshVariable(DistributedVariable):
     def var_getattr(self, tx, name: str) -> VariableTracker:
         if name == "ndim":
             return ConstantVariable.create(self.value.ndim)
+        if name == "device_type":
+            return ConstantVariable.create(self.value.device_type)
+
         return super().var_getattr(tx, name)
 
 
@@ -198,9 +212,7 @@ class ProcessGroupVariable(DistributedVariable):
 
     def var_getattr(self, tx, name):
         if name in ["rank", "size"]:
-            return variables.LambdaVariable(
-                lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
-            )
+            return variables.LambdaVariable(lambda *args, **kwargs: self.call_method(tx, name, args, kwargs))
         # TODO should this just raise unimplemented?
         return super().var_getattr(tx, name)
 

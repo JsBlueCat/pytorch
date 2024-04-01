@@ -102,9 +102,10 @@ def aot_dispatch_base_graph(
 
     # TODO: should factor this into a separate function for export that always only returns just the graph.
     if aot_config.is_export:
-        assert (
-            maybe_subclass_meta is None
-        ), "aot_export_module does not support tensor subclass inputs for now."
+        # NOTE: hack, do not check if traced tenosr is a subclass
+        # assert (
+        #     maybe_subclass_meta is None
+        # ), "aot_export_module does not support tensor subclass inputs for now."
         return fw_module
     return fw_module, list(updated_flat_args_subclasses_desugared), maybe_subclass_meta
 

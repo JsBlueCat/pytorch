@@ -138,6 +138,37 @@ def _str_to_reduce_op(reduceOp: str) -> dist.ReduceOp:
         raise ValueError(f"Invalid reduce operation {reduceOp}")
     return cast(dist.ReduceOp, op)
 
+def _send(self, dst, tag, ranks, group_size):
+    group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
+    assert group is not None
+
+    dist.send(self, dst, group=group)
+    return self
+
+def _recv(self, src, tag, ranks, group_size):
+    group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
+    assert group is not None
+
+    dist.recv(self, src, group=group)
+    return self
+
+def _isend(self, dst, tag, ranks, group_size):
+    group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
+    assert group is not None
+
+    work = dist.isend(self, dst, group=group)
+    _register_tensor_work(self, work)
+    return self
+
+
+def _irecv(self, src, tag, ranks, group_size):
+    group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
+    assert group is not None
+
+    work = dist.irecv(self, src, group=group)
+    _register_tensor_work(self, work)
+    return self
+
 
 """
 Kernel implementations (for eager runtime only) - should never be traced by torch.compile

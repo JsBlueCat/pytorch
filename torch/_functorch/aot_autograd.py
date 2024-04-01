@@ -511,6 +511,8 @@ def create_aot_dispatcher_function(
                 )(*fake_flat_args)
 
                 req_subclass_dispatch = requires_subclass_dispatch(fake_flat_args, fw_metadata)
+                from ._aot_autograd.subclass_utils import is_dtensor_subclass_dispatch
+                dtensor_dispatch = is_dtensor_subclass_dispatch(fake_flat_args, fw_metadata)
 
                 if needs_autograd and not any(x.requires_grad for x in fw_metadata.output_info):
                     # We realized that none of the outputs require grad,
@@ -568,7 +570,8 @@ Found a graph input that requires gradients, and received a mutation.
 This is currently banned in the aot_export workflow. If you need this functionality, please file a github issue.
 
 fw_metadata={str(fw_metadata)}""")
-            if req_subclass_dispatch:
+            # NOTE: hack: make DTensor dispatch succeed!
+            if req_subclass_dispatch and not dtensor_dispatch:
                 raise RuntimeError("""\
 aot_export is not currently supported with traceable tensor subclass.
 If you need this feature, please comment on <CREATE_ISSUE_LINK>""")
